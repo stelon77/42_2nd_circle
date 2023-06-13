@@ -1,0 +1,105 @@
+# **************************************************************************** #
+#                                                                              #
+#                                                         :::      ::::::::    #
+#    dockerfile                                         :+:      :+:    :+:    #
+#                                                     +:+ +:+         +:+      #
+#    By: lcoiffie <lcoiffie@student.42.fr>          +#+  +:+       +#+         #
+#                                                 +#+#+#+#+#+   +#+            #
+#    Created: 2020/05/10 22:34:16 by lcoiffie          #+#    #+#              #
+#    Updated: 2020/05/10 22:34:23 by lcoiffie         ###   ########.fr        #
+#                                                                              #
+# **************************************************************************** #
+
+# start image
+FROM debian:buster
+
+## installation process
+#
+RUN apt-get -y update \
+&& apt-get -y upgrade \
+\
+# SSL tools
+&& apt-get -y install libnss3-tools \
+\
+#maria db (mysql)
+mariadb-server \
+#nginx
+nginx \
+#php
+php php-cgi php-cli php-mbstring php-fpm php-mysql \
+#using wordpress
+php-curl php-gd php-intl php-soap php-xml php-xmlrpc php-zip \
+#wget for downloading 
+wget
+
+#directory creation of our site
+RUN mkdir /var/www/localhost
+
+#wordpress installation and setup
+RUN wget -P /tmp http://fr.wordpress.org/latest-fr_FR.tar.gz \
+&& tar -xzvf /tmp/latest-fr_FR.tar.gz -C /var/www/localhost/  \
+&& rm /tmp/latest-fr_FR.tar.gz
+COPY ./srcs/wp-config.php /var/www/localhost/wordpress/
+
+#phpmyadmin installation and setup
+RUN wget -P /tmp https://files.phpmyadmin.net/phpMyAdmin/4.9.5/phpMyAdmin-4.9.5-all-languages.tar.gz \
+&& tar -xzvf /tmp/phpMyAdmin-4.9.5-all-languages.tar.gz -C /var/www/localhost/ \
+&& rm /tmp/phpMyAdmin-4.9.5-all-languages.tar.gz \
+&& mv /var/www/localhost/phpMyAdmin-4.9.5-all-languages /var/www/localhost/phpmyadmin
+COPY ./srcs/config.inc.php /var/www/localhost/phpmyadmin
+
+#mysql (mariadb) setup
+#
+COPY ./srcs/wordpress_db.sql /root/
+#create user
+RUN service mysql start \
+&& mysql -e "CREATE USER 'my_user'@'localhost' IDENTIFIED BY 'my_password';" \
+#for phpmyadmin
+&& mysql -e "CREATE DATABASE wordpress_db;" \
+&& mysql -e "GRANT ALL PRIVILEGES ON phpmyadmin.* TO 'my_user'@'localhost';" \
+&& mysql -e "FLUSH PRIVILEGES;" \
+#for wordpress
+&& mysql -e "GRANT ALL PRIVILEGES ON wordpress_db.* TO 'my_user'@'localhost';" \
+&& mysql -e "FLUSH PRIVILEGES;" \
+&& mysql wordpress_db -u root < /root/wordpress_db.sql \
+&& rm /root/wordpress_db.sql
+
+#openSSL create key and certificate
+RUN openssl req -x509 -nodes -days 365 \
+-newkey rsa:2048 -sha256 \
+-keyout /etc/ssl/certs/localhost.key \
+-out /etc/ssl/certs/localhost.crt \
+-subj '/C=FR/ST=Seine et Marne/L=Fontainebleau/CN=localhost/emailAddress=lcoiffie@student.42.fr' \
+&& chmod 600 /etc/ssl/certs/localhost.key \
+&& chmod 600 /etc/ssl/certs/localhost.crt
+
+#onginx configuration
+COPY ./srcs/localhost.conf /etc/nginx/sites-available/localhost
+
+#activation of the site
+RUN ln -s /etc/nginx/sites-available/localhost /etc/nginx/sites-enabled/localhost
+
+#testing config
+#COPY ./srcs/tests/* /var/www/localhost/
+#RUN chmod 777 /var/www/localhost/test.sh \
+#&& service mysql start  && /var/www/localhost/test.sh \
+#&& rm /var/www/localhost/test.sh
+
+#changing user and group so nginx can read and write directly
+RUN chown -R www-data:www-data var/www/localhost
+
+
+COPY ./srcs/begin.sh /root/
+WORKDIR /root/
+CMD ["/bin/bash", "begin.sh"]
+
+EXPOSE 80 443
+
+#HOW TO USE IT
+#
+# 1 docker build -t ft_server
+# 2 docker run -p 80:80 -p 443:443 -ti ft_server
+# 
+# auto index off 
+# 2 docker run -p 80:80 -p 443:443 -e AUTOINDEX=off -ti ft_server
+#
